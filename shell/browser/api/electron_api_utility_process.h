@@ -80,6 +80,7 @@ class UtilityProcessWrapper final
   void HandleTermination(uint64_t exit_code);
 
   void PostMessage(gin::Arguments* args);
+  void PostMessageChunked(gin::Arguments* args);
   bool Kill();
   v8::Local<v8::Value> GetOSProcessId(v8::Isolate* isolate) const;
 

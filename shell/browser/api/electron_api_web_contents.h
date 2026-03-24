@@ -191,6 +191,20 @@ class WebContents final : public ExclusiveAccessContext,
   bool GetBackgroundThrottling() const override;
 
   void SetBackgroundThrottling(bool allowed);
+  std::string GetLyraVisibilityPolicy() const;
+  void SetLyraVisibilityPolicy(gin_helper::ErrorThrower thrower,
+                               const std::string& policy);
+  void Prewarm();
+  void SetLyraProtocolPermission(const std::string& origin,
+                                 const std::string& action,
+                                 bool allow);
+  bool HasLyraProtocolPermission(const std::string& origin,
+                                 const std::string& action) const;
+  bool EmitLyraProtocolNavigationEvent(const GURL& target_url,
+                                       const std::string& origin,
+                                       const std::string& action,
+                                       bool dangerous,
+                                       bool granted);
   int32_t GetProcessID() const;
   base::ProcessId GetOSProcessID() const;
   [[nodiscard]] Type type() const { return type_; }
@@ -461,6 +475,19 @@ class WebContents final : public ExclusiveAccessContext,
   WebContents& operator=(const WebContents&) = delete;
 
  private:
+  enum class LyraVisibilityPolicy {
+    kStrict,
+    kBalanced,
+    kInteractive,
+  };
+
+  static std::string BuildLyraPermissionKey(const std::string& origin,
+                                            const std::string& action);
+  static std::optional<LyraVisibilityPolicy> ParseLyraVisibilityPolicy(
+      const std::string& policy);
+  static std::string LyraVisibilityPolicyToString(
+      LyraVisibilityPolicy policy);
+
   // Does not manage lifetime of |web_contents|.
   WebContents(v8::Isolate* isolate, content::WebContents* web_contents);
   // Takes over ownership of |web_contents|.
@@ -802,6 +829,9 @@ class WebContents final : public ExclusiveAccessContext,
 
   // Whether background throttling is disabled.
   bool background_throttling_ = true;
+  LyraVisibilityPolicy lyra_visibility_policy_ =
+      LyraVisibilityPolicy::kBalanced;
+  std::map<std::string, bool> lyra_protocol_permission_overrides_;
 
   // Whether to enable devtools.
   bool enable_devtools_ = true;

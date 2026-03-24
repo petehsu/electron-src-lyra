@@ -139,6 +139,45 @@ class ForkUtilityProcess extends EventEmitter implements Electron.UtilityProcess
     return this.#handle?.postMessage(message);
   }
 
+  postMessageChunked (message: any, chunkBytes = 64 * 1024, transfer?: MessagePortMain[]) {
+    const handle = this.#handle as any;
+    if (!handle) return undefined;
+
+    const send = (payload: any, ports?: any[]) => {
+      if (typeof handle.postMessageChunked === 'function') {
+        return ports ? handle.postMessageChunked(payload, ports) : handle.postMessageChunked(payload);
+      }
+      return ports ? handle.postMessage(payload, ports) : handle.postMessage(payload);
+    };
+
+    if (!Number.isFinite(chunkBytes) || chunkBytes <= 0) {
+      chunkBytes = 64 * 1024;
+    }
+
+    if (typeof message === 'string' && message.length > chunkBytes) {
+      const streamId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const total = Math.ceil(message.length / chunkBytes);
+      for (let i = 0; i < total; i++) {
+        const start = i * chunkBytes;
+        const end = Math.min(start + chunkBytes, message.length);
+        send({
+          __lyraChunked: true,
+          streamId,
+          index: i,
+          total,
+          chunk: message.slice(start, end)
+        });
+      }
+      return undefined;
+    }
+
+    if (Array.isArray(transfer)) {
+      transfer = transfer.map((o: any) => o instanceof MessagePortMain ? o._internalPort : o);
+      return send(message, transfer);
+    }
+    return send(message);
+  }
+
   kill () : boolean {
     if (this.#handle === null) {
       return false;

@@ -23,6 +23,7 @@
 #include "base/json/json_reader.h"
 #include "base/no_destructor.h"
 #include "base/strings/strcat.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/current_thread.h"
 #include "base/threading/scoped_blocking_call.h"
@@ -456,6 +457,20 @@ constexpr char kFooterTemplate[] = "footerTemplate";
 constexpr char kPreferCSSPageSize[] = "preferCSSPageSize";
 constexpr char kGenerateTaggedPDF[] = "generateTaggedPDF";
 constexpr char kGenerateDocumentOutline[] = "generateDocumentOutline";
+constexpr char kLyraVisibilityStrict[] = "strict";
+constexpr char kLyraVisibilityBalanced[] = "balanced";
+constexpr char kLyraVisibilityInteractive[] = "interactive";
+
+std::string NormalizeLyraPermissionComponent(std::string_view value,
+                                             std::string_view fallback) {
+  std::string normalized =
+      base::ToLowerASCII(std::string(base::TrimWhitespaceASCII(
+          value, base::TrimPositions::TRIM_ALL)));
+  if (normalized.empty()) {
+    normalized = std::string(fallback);
+  }
+  return normalized;
+}
 
 constexpr std::string_view CursorTypeToString(
     ui::mojom::CursorType cursor_type) {
@@ -2358,6 +2373,45 @@ bool WebContents::GetBackgroundThrottling() const {
   return background_throttling_;
 }
 
+// static
+std::string WebContents::BuildLyraPermissionKey(const std::string& origin,
+                                                const std::string& action) {
+  const std::string normalized_origin =
+      NormalizeLyraPermissionComponent(origin, "null");
+  const std::string normalized_action =
+      NormalizeLyraPermissionComponent(action, "navigate");
+  return base::StrCat({normalized_origin, "|", normalized_action});
+}
+
+// static
+std::optional<WebContents::LyraVisibilityPolicy>
+WebContents::ParseLyraVisibilityPolicy(const std::string& policy) {
+  if (base::EqualsCaseInsensitiveASCII(policy, kLyraVisibilityStrict)) {
+    return LyraVisibilityPolicy::kStrict;
+  }
+  if (base::EqualsCaseInsensitiveASCII(policy, kLyraVisibilityBalanced)) {
+    return LyraVisibilityPolicy::kBalanced;
+  }
+  if (base::EqualsCaseInsensitiveASCII(policy, kLyraVisibilityInteractive)) {
+    return LyraVisibilityPolicy::kInteractive;
+  }
+  return std::nullopt;
+}
+
+// static
+std::string WebContents::LyraVisibilityPolicyToString(
+    LyraVisibilityPolicy policy) {
+  switch (policy) {
+    case LyraVisibilityPolicy::kStrict:
+      return kLyraVisibilityStrict;
+    case LyraVisibilityPolicy::kBalanced:
+      return kLyraVisibilityBalanced;
+    case LyraVisibilityPolicy::kInteractive:
+      return kLyraVisibilityInteractive;
+  }
+  return kLyraVisibilityBalanced;
+}
+
 void WebContents::SetBackgroundThrottling(bool allowed) {
   background_throttling_ = allowed;
 
@@ -2381,9 +2435,86 @@ void WebContents::SetBackgroundThrottling(bool allowed) {
   rwh_impl->disable_hidden_ = !background_throttling_;
   web_contents()->GetRenderViewHost()->SetSchedulerThrottling(allowed);
 
+  if (rwh_impl->IsHidden() &&
+      lyra_visibility_policy_ == LyraVisibilityPolicy::kInteractive) {
+    rwh_impl->WasShown({});
+  }
+}
+
+std::string WebContents::GetLyraVisibilityPolicy() const {
+  return LyraVisibilityPolicyToString(lyra_visibility_policy_);
+}
+
+void WebContents::SetLyraVisibilityPolicy(gin_helper::ErrorThrower thrower,
+                                          const std::string& policy) {
+  std::optional<LyraVisibilityPolicy> parsed = ParseLyraVisibilityPolicy(policy);
+  if (!parsed.has_value()) {
+    thrower.ThrowError(
+        "Invalid visibility policy. Expected strict|balanced|interactive");
+    return;
+  }
+  if (lyra_visibility_policy_ == parsed.value())
+    return;
+
+  lyra_visibility_policy_ = parsed.value();
+  Emit("lyra-visibility-policy-changed", GetLyraVisibilityPolicy());
+}
+
+void WebContents::Prewarm() {
+  auto* rfh = web_contents()->GetPrimaryMainFrame();
+  if (!rfh)
+    return;
+
+  auto* rwhv = rfh->GetView();
+  if (!rwhv)
+    return;
+
+  auto* rwh_impl =
+      static_cast<content::RenderWidgetHostImpl*>(rwhv->GetRenderWidgetHost());
+  if (!rwh_impl)
+    return;
+
+  // Touch the hidden widget path early to reduce tab switch jank.
   if (rwh_impl->IsHidden()) {
     rwh_impl->WasShown({});
   }
+  Emit("lyra-prewarm-applied");
+}
+
+void WebContents::SetLyraProtocolPermission(const std::string& origin,
+                                            const std::string& action,
+                                            bool allow) {
+  const std::string key = BuildLyraPermissionKey(origin, action);
+  if (allow) {
+    lyra_protocol_permission_overrides_[key] = true;
+  } else {
+    lyra_protocol_permission_overrides_.erase(key);
+  }
+}
+
+bool WebContents::HasLyraProtocolPermission(const std::string& origin,
+                                            const std::string& action) const {
+  const std::string key = BuildLyraPermissionKey(origin, action);
+  const auto it = lyra_protocol_permission_overrides_.find(key);
+  return it != lyra_protocol_permission_overrides_.end() && it->second;
+}
+
+bool WebContents::EmitLyraProtocolNavigationEvent(const GURL& target_url,
+                                                  const std::string& origin,
+                                                  const std::string& action,
+                                                  bool dangerous,
+                                                  bool granted) {
+  v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
+  v8::HandleScope handle_scope(isolate);
+
+  gin_helper::internal::Event* event =
+      gin_helper::internal::Event::New(isolate);
+  v8::Local<v8::Object> event_object =
+      event->GetWrapper(isolate).ToLocalChecked();
+
+  EmitWithoutEvent("will-lyra-protocol", event_object, target_url.spec(),
+                   origin, action, dangerous, granted);
+  return event->GetDefaultPrevented();
 }
 
 int32_t WebContents::GetProcessID() const {
@@ -4526,6 +4657,13 @@ void WebContents::FillObjectTemplate(v8::Isolate* isolate,
                  &WebContents::GetBackgroundThrottling)
       .SetMethod("setBackgroundThrottling",
                  &WebContents::SetBackgroundThrottling)
+      .SetMethod("getLyraVisibilityPolicy",
+                 &WebContents::GetLyraVisibilityPolicy)
+      .SetMethod("setLyraVisibilityPolicy",
+                 &WebContents::SetLyraVisibilityPolicy)
+      .SetMethod("prewarm", &WebContents::Prewarm)
+      .SetMethod("setLyraProtocolPermission",
+                 &WebContents::SetLyraProtocolPermission)
       .SetMethod("getProcessId", &WebContents::GetProcessID)
       .SetMethod("getOSProcessId", &WebContents::GetOSProcessID)
       .SetMethod("equal", &WebContents::Equal)

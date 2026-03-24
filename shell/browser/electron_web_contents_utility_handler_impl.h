@@ -5,11 +5,15 @@
 #ifndef ELECTRON_SHELL_BROWSER_ELECTRON_WEB_CONTENTS_UTILITY_HANDLER_IMPL_H_
 #define ELECTRON_SHELL_BROWSER_ELECTRON_WEB_CONTENTS_UTILITY_HANDLER_IMPL_H_
 
+#include <map>
+#include <string>
+
 #include "base/memory/weak_ptr.h"
 #include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "electron/shell/common/web_contents_utility.mojom.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
+#include "mojo/public/cpp/system/data_pipe.h"
 #include "shell/browser/api/electron_api_web_contents.h"
 
 namespace content {
@@ -44,6 +48,9 @@ class ElectronWebContentsUtilityHandlerImpl
       mojom::PermissionName name,
       const blink::LocalFrameToken& frame_token,
       CanAccessClipboardDeprecatedCallback callback) override;
+  void BeginLyraStream(mojom::LyraStreamRequestPtr request,
+                       BeginLyraStreamCallback callback) override;
+  void CancelLyraStream(const std::string& stream_id) override;
 
   base::WeakPtr<ElectronWebContentsUtilityHandlerImpl> GetWeakPtr() {
     return weak_factory_.GetWeakPtr();
@@ -60,6 +67,7 @@ class ElectronWebContentsUtilityHandlerImpl
   content::RenderFrameHost* GetRenderFrameHost();
 
   content::GlobalRenderFrameHostToken render_frame_host_token_;
+  std::map<std::string, mojo::ScopedDataPipeProducerHandle> lyra_streams_;
 
   mojo::AssociatedReceiver<mojom::ElectronWebContentsUtility> receiver_{this};
 

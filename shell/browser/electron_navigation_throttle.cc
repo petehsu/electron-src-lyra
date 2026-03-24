@@ -4,14 +4,84 @@
 
 #include "shell/browser/electron_navigation_throttle.h"
 
+#include <string>
+
+#include "base/strings/string_util.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"  // nogncheck
 #include "content/public/browser/navigation_handle.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "shell/browser/api/electron_api_web_contents.h"
 #include "shell/browser/javascript_environment.h"
 #include "ui/base/page_transition_types.h"
 
 namespace electron {
+
+namespace {
+
+bool IsLyraProtocol(const GURL& url) {
+  return url.SchemeIs("lyra") || url.SchemeIs("lyra-file");
+}
+
+std::string ResolveLyraAction(const GURL& url) {
+  if (url.SchemeIs("lyra-file"))
+    return "file";
+
+  std::string host = base::ToLowerASCII(url.host_piece());
+  if (host.empty())
+    return "navigate";
+  if (host == "exec" || host == "shell")
+    return "exec";
+  return host;
+}
+
+bool IsLyraDangerousAction(const std::string& action) {
+  return action == "exec" || action == "file";
+}
+
+std::string ResolveLyraOrigin(content::NavigationHandle* handle) {
+  if (handle->GetInitiatorFrameToken().has_value()) {
+    auto token = content::GlobalRenderFrameHostToken(
+        handle->GetInitiatorProcessId(),
+        handle->GetInitiatorFrameToken().value());
+    if (auto* initiator = content::RenderFrameHost::FromFrameToken(token)) {
+      const GURL initiator_url = initiator->GetLastCommittedURL();
+      if (initiator_url.is_valid()) {
+        return initiator_url.DeprecatedGetOriginAsURL().spec();
+      }
+    }
+  }
+  if (handle->GetReferrer().url.is_valid()) {
+    return handle->GetReferrer().url.DeprecatedGetOriginAsURL().spec();
+  }
+  return "null";
+}
+
+content::NavigationThrottle::ThrottleCheckResult HandleLyraProtocolGate(
+    content::NavigationHandle* handle,
+    api::WebContents* api_contents) {
+  const GURL target_url = handle->GetURL();
+  if (!IsLyraProtocol(target_url))
+    return content::NavigationThrottle::PROCEED;
+
+  const std::string origin = ResolveLyraOrigin(handle);
+  const std::string action = ResolveLyraAction(target_url);
+  const bool dangerous = IsLyraDangerousAction(action);
+  const bool granted = api_contents->HasLyraProtocolPermission(origin, action);
+
+  if (api_contents->EmitLyraProtocolNavigationEvent(target_url, origin, action,
+                                                    dangerous, granted)) {
+    return content::NavigationThrottle::CANCEL;
+  }
+  // Fail closed for dangerous actions unless explicitly granted.
+  if (dangerous && !granted) {
+    return content::NavigationThrottle::CANCEL;
+  }
+
+  return content::NavigationThrottle::PROCEED;
+}
+
+}  // namespace
 
 ElectronNavigationThrottle::ElectronNavigationThrottle(
     content::NavigationThrottleRegistry& registry)
@@ -37,6 +107,10 @@ ElectronNavigationThrottle::WillStartRequest() {
   if (!api_contents) {
     // No need to emit any event if the WebContents is not available in JS.
     return PROCEED;
+  }
+
+  if (HandleLyraProtocolGate(handle, api_contents) == CANCEL) {
+    return CANCEL;
   }
 
   bool is_renderer_initiated = handle->IsRendererInitiated();
@@ -77,6 +151,10 @@ ElectronNavigationThrottle::WillRedirectRequest() {
   if (!api_contents) {
     // No need to emit any event if the WebContents is not available in JS.
     return PROCEED;
+  }
+
+  if (HandleLyraProtocolGate(handle, api_contents) == CANCEL) {
+    return CANCEL;
   }
 
   if (api_contents->EmitNavigationEvent("will-redirect", handle)) {

@@ -64,6 +64,7 @@ class Protocol final : public gin_helper::DeprecatedWrappable<Protocol>,
     kNotRegistered,
     kIntercepted,
     kNotIntercepted,
+    kReserved,
   };
 
   // Callback types.

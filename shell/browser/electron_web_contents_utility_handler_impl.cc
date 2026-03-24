@@ -6,12 +6,14 @@
 
 #include <utility>
 
+#include "base/unguessable_token.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/permission_controller.h"
 #include "content/public/browser/permission_descriptor_util.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
+#include "mojo/public/cpp/system/data_pipe.h"
 #include "shell/browser/web_contents_permission_helper.h"
 #include "third_party/blink/public/mojom/permissions/permission_status.mojom.h"
 
@@ -41,6 +43,7 @@ void ElectronWebContentsUtilityHandlerImpl::RenderFrameDeleted(
 }
 
 void ElectronWebContentsUtilityHandlerImpl::OnConnectionError() {
+  lyra_streams_.clear();
   delete this;
 }
 
@@ -94,6 +97,47 @@ void ElectronWebContentsUtilityHandlerImpl::CanAccessClipboardDeprecated(
   } else {
     std::move(callback).Run(blink::mojom::PermissionStatus::DENIED);
   }
+}
+
+void ElectronWebContentsUtilityHandlerImpl::BeginLyraStream(
+    mojom::LyraStreamRequestPtr request,
+    BeginLyraStreamCallback callback) {
+  auto result = mojom::LyraStreamResult::New();
+  std::string stream_id = request ? request->stream_id : std::string();
+  if (stream_id.empty()) {
+    stream_id = base::UnguessableToken::Create().ToString();
+  }
+
+  uint32_t chunk_bytes =
+      request && request->chunk_bytes > 0 ? request->chunk_bytes : 64 * 1024;
+  MojoCreateDataPipeOptions options{
+      sizeof(MojoCreateDataPipeOptions), MOJO_CREATE_DATA_PIPE_FLAG_NONE, 1,
+      chunk_bytes};
+
+  mojo::ScopedDataPipeProducerHandle producer;
+  mojo::ScopedDataPipeConsumerHandle consumer;
+  MojoResult status = mojo::CreateDataPipe(&options, producer, consumer);
+  if (status != MOJO_RESULT_OK) {
+    result->accepted = false;
+    result->stream_id = stream_id;
+    result->message = "Failed to create data pipe";
+    std::move(callback).Run(std::move(result),
+                            mojo::ScopedDataPipeConsumerHandle());
+    return;
+  }
+
+  lyra_streams_[stream_id] = std::move(producer);
+  result->accepted = true;
+  result->stream_id = stream_id;
+  result->message = "";
+  std::move(callback).Run(std::move(result), std::move(consumer));
+}
+
+void ElectronWebContentsUtilityHandlerImpl::CancelLyraStream(
+    const std::string& stream_id) {
+  if (stream_id.empty())
+    return;
+  lyra_streams_.erase(stream_id);
 }
 
 content::RenderFrameHost*

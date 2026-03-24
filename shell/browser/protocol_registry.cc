@@ -4,11 +4,24 @@
 
 #include "shell/browser/protocol_registry.h"
 
+#include <array>
+#include <string_view>
+
 #include "electron/fuses.h"
+#include "base/strings/string_util.h"
 #include "shell/browser/electron_browser_context.h"
 #include "shell/browser/net/asar/asar_url_loader_factory.h"
 
 namespace electron {
+
+namespace {
+
+constexpr std::array<std::string_view, 2> kLyraReservedSchemes = {
+    "lyra",
+    "lyra-file",
+};
+
+}  // namespace
 
 // static
 ProtocolRegistry* ProtocolRegistry::FromBrowserContext(
@@ -66,10 +79,14 @@ ProtocolRegistry::CreateNonNetworkNavigationURLLoaderFactory(
 bool ProtocolRegistry::RegisterProtocol(ProtocolType type,
                                         const std::string& scheme,
                                         const ProtocolHandler& handler) {
+  if (IsLyraReservedScheme(scheme))
+    return false;
   return handlers_.try_emplace(scheme, type, handler).second;
 }
 
 bool ProtocolRegistry::UnregisterProtocol(const std::string& scheme) {
+  if (IsLyraReservedScheme(scheme))
+    return false;
   return handlers_.erase(scheme) != 0;
 }
 
@@ -83,10 +100,14 @@ const HandlersMap::mapped_type* ProtocolRegistry::FindRegistered(
 bool ProtocolRegistry::InterceptProtocol(ProtocolType type,
                                          const std::string& scheme,
                                          const ProtocolHandler& handler) {
+  if (IsLyraReservedScheme(scheme))
+    return false;
   return intercept_handlers_.try_emplace(scheme, type, handler).second;
 }
 
 bool ProtocolRegistry::UninterceptProtocol(const std::string& scheme) {
+  if (IsLyraReservedScheme(scheme))
+    return false;
   return intercept_handlers_.erase(scheme) != 0;
 }
 
@@ -95,6 +116,15 @@ const HandlersMap::mapped_type* ProtocolRegistry::FindIntercepted(
   const auto& map = intercept_handlers_;
   const auto iter = map.find(scheme);
   return iter != std::end(map) ? &iter->second : nullptr;
+}
+
+// static
+bool ProtocolRegistry::IsLyraReservedScheme(std::string_view scheme) {
+  for (auto reserved : kLyraReservedSchemes) {
+    if (base::EqualsCaseInsensitiveASCII(scheme, reserved))
+      return true;
+  }
+  return false;
 }
 
 }  // namespace electron

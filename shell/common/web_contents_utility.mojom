@@ -8,6 +8,17 @@ enum PermissionName {
   DEPRECATED_SYNC_CLIPBOARD_READ,
 };
 
+struct LyraStreamRequest {
+  string stream_id;
+  uint32 chunk_bytes;
+};
+
+struct LyraStreamResult {
+  bool accepted;
+  string stream_id;
+  string message;
+};
+
 interface ElectronWebContentsUtility {
   // Informs underlying WebContents that first non-empty layout was performed
   // by compositor.
@@ -19,4 +30,8 @@ interface ElectronWebContentsUtility {
   CanAccessClipboardDeprecated(
       PermissionName name,
       blink.mojom.LocalFrameToken frame_token) => (blink.mojom.PermissionStatus status);
+
+  BeginLyraStream(LyraStreamRequest request) =>
+      (LyraStreamResult result, handle<data_pipe_consumer> data_pipe);
+  CancelLyraStream(string stream_id);
 };

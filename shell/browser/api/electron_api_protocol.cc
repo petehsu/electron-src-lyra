@@ -96,6 +96,29 @@ std::vector<std::string>& GetStreamingSchemes() {
   return *g_streaming_schemes;
 }
 
+void EnsureLyraBuiltinSchemesRegistered() {
+  static base::NoDestructor<bool> initialized{false};
+  if (*initialized)
+    return;
+
+  *initialized = true;
+  auto* policy = content::ChildProcessSecurityPolicy::GetInstance();
+  url::AddStandardScheme("lyra", url::SCHEME_WITH_HOST);
+  url::AddStandardScheme("lyra-file", url::SCHEME_WITH_HOST);
+  url::AddSecureScheme("lyra");
+  url::AddSecureScheme("lyra-file");
+  policy->RegisterWebSafeScheme("lyra");
+  policy->RegisterWebSafeScheme("lyra-file");
+
+  auto& standard_schemes = GetStandardSchemes();
+  if (!std::ranges::contains(standard_schemes, "lyra")) {
+    standard_schemes.push_back("lyra");
+  }
+  if (!std::ranges::contains(standard_schemes, "lyra-file")) {
+    standard_schemes.push_back("lyra-file");
+  }
+}
+
 void AddServiceWorkerScheme(const std::string& scheme) {
   // There is no API to add service worker scheme, but there is an API to
   // return const reference to the schemes vector.
@@ -196,7 +219,9 @@ const char* const kBuiltinSchemes[] = {
 }  // namespace
 
 Protocol::Protocol(ProtocolRegistry* protocol_registry)
-    : protocol_registry_{protocol_registry} {}
+    : protocol_registry_{protocol_registry} {
+  EnsureLyraBuiltinSchemesRegistered();
+}
 
 Protocol::~Protocol() = default;
 
@@ -212,6 +237,8 @@ std::string_view Protocol::ErrorCodeToString(Error error) {
       return "The scheme has been intercepted";
     case Error::kNotIntercepted:
       return "The scheme has not been intercepted";
+    case Error::kReserved:
+      return "The scheme is reserved by Lyra and cannot be overridden";
     default:
       return "Unexpected error";
   }
@@ -220,12 +247,18 @@ std::string_view Protocol::ErrorCodeToString(Error error) {
 Protocol::Error Protocol::RegisterProtocol(ProtocolType type,
                                            const std::string& scheme,
                                            const ProtocolHandler& handler) {
+  if (ProtocolRegistry::IsLyraReservedScheme(scheme))
+    return Error::kReserved;
   bool added = protocol_registry_->RegisterProtocol(type, scheme, handler);
   return added ? Error::kOK : Error::kRegistered;
 }
 
 bool Protocol::UnregisterProtocol(const std::string& scheme,
                                   gin::Arguments* args) {
+  if (ProtocolRegistry::IsLyraReservedScheme(scheme)) {
+    HandleOptionalCallback(args, Error::kReserved);
+    return false;
+  }
   bool removed = protocol_registry_->UnregisterProtocol(scheme);
   HandleOptionalCallback(args, removed ? Error::kOK : Error::kNotRegistered);
   return removed;
@@ -238,12 +271,18 @@ bool Protocol::IsProtocolRegistered(const std::string& scheme) {
 Protocol::Error Protocol::InterceptProtocol(ProtocolType type,
                                             const std::string& scheme,
                                             const ProtocolHandler& handler) {
+  if (ProtocolRegistry::IsLyraReservedScheme(scheme))
+    return Error::kReserved;
   bool added = protocol_registry_->InterceptProtocol(type, scheme, handler);
   return added ? Error::kOK : Error::kIntercepted;
 }
 
 bool Protocol::UninterceptProtocol(const std::string& scheme,
                                    gin::Arguments* args) {
+  if (ProtocolRegistry::IsLyraReservedScheme(scheme)) {
+    HandleOptionalCallback(args, Error::kReserved);
+    return false;
+  }
   bool removed = protocol_registry_->UninterceptProtocol(scheme);
   HandleOptionalCallback(args, removed ? Error::kOK : Error::kNotIntercepted);
   return removed;

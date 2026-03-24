@@ -51,6 +51,8 @@ class ProtocolRegistry {
   [[nodiscard]] const HandlersMap::mapped_type* FindIntercepted(
       std::string_view scheme) const;
 
+  static bool IsLyraReservedScheme(std::string_view scheme);
+
  private:
   friend class ElectronBrowserContext;
 

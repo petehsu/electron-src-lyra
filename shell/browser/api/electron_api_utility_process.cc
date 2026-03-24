@@ -385,6 +385,11 @@ void UtilityProcessWrapper::PostMessage(gin::Arguments* const args) {
   connector_->Accept(&mojo_message);
 }
 
+void UtilityProcessWrapper::PostMessageChunked(gin::Arguments* const args) {
+  // Chunking is implemented in JS wrapper; native path keeps compatibility.
+  PostMessage(args);
+}
+
 bool UtilityProcessWrapper::Kill() {
   if (pid_ == base::kNullProcessId)
     return false;
@@ -517,6 +522,8 @@ gin::ObjectTemplateBuilder UtilityProcessWrapper::GetObjectTemplateBuilder(
   return gin_helper::EventEmitterMixin<
              UtilityProcessWrapper>::GetObjectTemplateBuilder(isolate)
       .SetMethod("postMessage", &UtilityProcessWrapper::PostMessage)
+      .SetMethod("postMessageChunked",
+                 &UtilityProcessWrapper::PostMessageChunked)
       .SetMethod("kill", &UtilityProcessWrapper::Kill)
       .SetProperty("pid", &UtilityProcessWrapper::GetOSProcessId);
 }

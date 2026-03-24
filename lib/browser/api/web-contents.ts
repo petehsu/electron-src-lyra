@@ -130,6 +130,14 @@ WebContents.prototype._sendInternal = function (channel, ...args) {
   return this.mainFrame._sendInternal(channel, ...args);
 };
 
+(WebContents.prototype as any).prewarmTab = function () {
+  return this.prewarm();
+};
+
+(WebContents.prototype as any).grantLyraProtocolPermission = function (origin, action, allow) {
+  return this.setLyraProtocolPermission(origin, action, allow);
+};
+
 function getWebFrame (contents: Electron.WebContents, frame: number | [number, number]) {
   if (typeof frame === 'number') {
     return webFrameMain.fromId(contents.mainFrame.processId, frame);
