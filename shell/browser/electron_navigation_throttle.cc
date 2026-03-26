@@ -27,7 +27,7 @@ std::string ResolveLyraAction(const GURL& url) {
   if (url.SchemeIs("lyra-file"))
     return "file";
 
-  std::string host = base::ToLowerASCII(url.host_piece());
+  std::string host = base::ToLowerASCII(url.host());
   if (host.empty())
     return "navigate";
   if (host == "exec" || host == "shell")
@@ -109,7 +109,7 @@ ElectronNavigationThrottle::WillStartRequest() {
     return PROCEED;
   }
 
-  if (HandleLyraProtocolGate(handle, api_contents) == CANCEL) {
+  if (HandleLyraProtocolGate(handle, api_contents).action() == CANCEL) {
     return CANCEL;
   }
 
@@ -153,7 +153,7 @@ ElectronNavigationThrottle::WillRedirectRequest() {
     return PROCEED;
   }
 
-  if (HandleLyraProtocolGate(handle, api_contents) == CANCEL) {
+  if (HandleLyraProtocolGate(handle, api_contents).action() == CANCEL) {
     return CANCEL;
   }
 

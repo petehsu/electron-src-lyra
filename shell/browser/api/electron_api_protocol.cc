@@ -97,11 +97,11 @@ std::vector<std::string>& GetStreamingSchemes() {
 }
 
 void EnsureLyraBuiltinSchemesRegistered() {
-  static base::NoDestructor<bool> initialized{false};
-  if (*initialized)
+  constinit static bool initialized = false;
+  if (initialized)
     return;
 
-  *initialized = true;
+  initialized = true;
   auto* policy = content::ChildProcessSecurityPolicy::GetInstance();
   url::AddStandardScheme("lyra", url::SCHEME_WITH_HOST);
   url::AddStandardScheme("lyra-file", url::SCHEME_WITH_HOST);

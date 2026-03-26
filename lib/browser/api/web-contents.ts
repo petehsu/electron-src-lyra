@@ -134,7 +134,7 @@ WebContents.prototype._sendInternal = function (channel, ...args) {
   return this.prewarm();
 };
 
-(WebContents.prototype as any).grantLyraProtocolPermission = function (origin, action, allow) {
+(WebContents.prototype as any).grantLyraProtocolPermission = function (origin: string, action: string, allow: boolean) {
   return this.setLyraProtocolPermission(origin, action, allow);
 };
 
